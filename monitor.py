@@ -2686,13 +2686,6 @@ class ProjectMonitor:
     ) -> list[dict[str, Any]]:
         all_metrics = workbench / "final_ranked_designs" / "all_designs_metrics.csv"
         final_metrics = self._boltzgen_final_metrics(workbench)
-        output_progress = self._boltzgen_output_progress(workbench)
-        analyzed_rows = int(output_progress["counts"]["analysis"])
-        filtered_rows = int(output_progress["counts"]["filtering"])
-        activity_values = [
-            str(output_progress.get("updated_at") or ""),
-            _iso_mtime(final_metrics),
-        ]
         stage_definitions = (
             ("design", "Design"),
             ("inverse_folding", "Inverse folding"),
@@ -2702,6 +2695,8 @@ class ProjectMonitor:
         )
 
         if final_metrics is not None:
+            analyzed_rows = self._csv_data_rows(all_metrics)
+            filtered_rows = self._csv_data_rows(final_metrics)
             total = max(target, design_override, analyzed_rows, 1)
             stages = []
             for stage_id, title in stage_definitions:
@@ -2731,13 +2726,22 @@ class ProjectMonitor:
                     )
                 )
             latest_activity = max(
-                (value for value in activity_values if value),
+                (
+                    value
+                    for value in (
+                        _iso_mtime(all_metrics),
+                        _iso_mtime(final_metrics),
+                    )
+                    if value
+                ),
                 default="",
             )
             if latest_activity:
                 self._boltzgen_activity_cache[str(workbench)] = latest_activity
             return stages
 
+        output_progress = self._boltzgen_output_progress(workbench)
+        activity_values = [str(output_progress.get("updated_at") or "")]
         progress = self._boltzgen_log_progress(project, unit_id)
         current_index = int(progress.get("stage_index") or 0)
         output_counts = {
