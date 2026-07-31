@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="AuraPilot IFLD workflow monitoring dashboard">
+    <title>AuraPilot Monitor</title>
+    <script>
+      if (window.location.protocol === "file:") {
+        window.location.replace(`http://127.0.0.1:8765/${window.location.search}`);
+      }
+    </script>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="project-rail">
+        <div class="brand">
+          <div class="brand-mark">AP</div>
+          <div>
+            <strong>AuraPilot</strong>
+            <span>Workflow monitor</span>
+          </div>
+        </div>
+
+        <div class="server-switcher" id="serverSwitcher" aria-label="Monitoring servers">
+          <button type="button" data-server="all">
+            <span>All</span>
+            <small id="allServerCount">0</small>
+          </button>
+          <button class="active" type="button" data-server="ln">
+            <i></i>
+            <span>LN</span>
+            <small id="lnServerCount">—</small>
+          </button>
+          <button type="button" data-server="huoshan">
+            <i></i>
+            <span>Huoshan</span>
+            <small id="huoshanServerCount">—</small>
+          </button>
+        </div>
+
+        <div class="workflow-branches" id="workflowBranches" aria-label="Workflow branches">
+          <button class="active" type="button" data-family="ifld">
+            <span>IFLD</span>
+            <small id="ifldCount">0</small>
+          </button>
+          <button type="button" data-family="partial_denovo">
+            <span>Partial de novo</span>
+            <small id="partialCount">0</small>
+          </button>
+        </div>
+
+        <label class="project-search">
+          <span>⌕</span>
+          <input id="projectSearch" type="search" placeholder="Search projects…" autocomplete="off">
+        </label>
+        <div class="project-status-filters" id="projectStatusFilters" aria-label="Project status filters">
+          <button class="active" type="button" data-project-status="all">All <small id="projectAllCount">0</small></button>
+          <button type="button" data-project-status="running">Running <small id="projectRunningCount">0</small></button>
+          <button type="button" data-project-status="failed">Failed <small id="projectFailedCount">0</small></button>
+          <button type="button" data-project-status="pending">Waiting <small id="projectPendingCount">0</small></button>
+          <button type="button" data-project-status="complete">Done <small id="projectCompleteCount">0</small></button>
+        </div>
+
+        <div class="rail-heading">
+          <span>Projects</span>
+          <strong id="projectCount">0</strong>
+        </div>
+        <div class="project-list" id="projectList" aria-live="polite"></div>
+
+        <div class="rail-footer">
+          <span class="live-dot"></span>
+          <div>
+            <strong id="serverName">LN · Read-only</strong>
+            <span id="projectRootPath">/nfs/project</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <div class="eyebrow" id="workflowEyebrow">IFLD workflow / live filesystem state</div>
+            <h1 id="projectTitle">Loading projects…</h1>
+            <p id="projectMeta">正在读取项目状态</p>
+          </div>
+          <div class="topbar-actions">
+            <label class="run-select-label">
+              <span id="runSelectLabelText">Run</span>
+              <select id="runSelect" aria-label="选择 Run"></select>
+            </label>
+            <button class="refresh-button" id="refreshButton" type="button">
+              <span>↻</span> Refresh
+            </button>
+          </div>
+        </header>
+
+        <section class="run-summary pending" id="runSummary" aria-label="Run summary">
+          <div class="summary-primary">
+            <div class="summary-topline">
+              <span class="status-pill pending" id="overallStatus">Pending</span>
+              <span class="summary-live"><i class="live-dot"></i> Live · 5s</span>
+            </div>
+
+            <div class="summary-stage">
+              <span>Current stage</span>
+              <strong id="currentStage">Waiting to start</strong>
+              <small>
+                <b id="workflowName">—</b>
+                <span aria-hidden="true">·</span>
+                <span id="profileName">—</span>
+              </small>
+              <div class="summary-runtime" id="runtimeMeta"></div>
+            </div>
+
+            <div class="summary-progress-copy">
+              <span>Current stage progress</span>
+              <strong>
+                <span id="workflowProgressCount">—</span>
+                <b id="workflowProgressText">0%</b>
+              </strong>
+            </div>
+            <div
+              class="summary-progress"
+              id="workflowProgress"
+              role="progressbar"
+              aria-label="Current stage progress"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
+            >
+              <span id="workflowProgressBar"></span>
+            </div>
+          </div>
+
+          <div class="summary-facts">
+            <div class="summary-fact">
+              <span>Steps complete</span>
+              <strong id="stepsComplete">0 / 6</strong>
+            </div>
+            <div class="summary-fact">
+              <span id="activityLabel">Last activity</span>
+              <strong id="lastUpdated" title="">—</strong>
+            </div>
+            <div class="summary-fact summary-errors" id="activeErrorFact">
+              <span>Active errors</span>
+              <strong id="activeErrors">0</strong>
+            </div>
+          </div>
+        </section>
+
+        <div class="content-grid" id="contentGrid">
+          <section class="pipeline-panel">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Execution path</span>
+                <h2 id="pipelineTitle">Six-step IFLD workflow</h2>
+              </div>
+              <div class="legend" aria-label="状态图例">
+                <span><i class="legend-dot complete"></i>Complete</span>
+                <span><i class="legend-dot running"></i>Running</span>
+                <span><i class="legend-dot failed"></i>Failed</span>
+                <span><i class="legend-dot reused"></i>Reused</span>
+                <span><i class="legend-dot cancelled"></i>Stopped</span>
+              </div>
+            </div>
+            <div class="pipeline" id="pipeline" aria-live="polite"></div>
+          </section>
+
+          <aside class="artifact-panel" id="artifactPanel">
+            <div class="section-heading artifact-heading">
+              <div class="artifact-heading-copy">
+                <span class="eyebrow">Canonical outputs</span>
+                <h2 id="sidePanelTitle">Workflow deliverables</h2>
+              </div>
+              <span class="artifact-count" id="artifactCount">0 files</span>
+              <button class="artifact-panel-toggle" id="artifactPanelToggle" type="button"
+                aria-label="Collapse side panel" aria-expanded="true">›</button>
+            </div>
+            <div class="side-panel-tabs" id="sidePanelTabs" role="tablist" aria-label="Run details">
+              <button class="active" type="button" role="tab" data-side-tab="outputs" aria-selected="true">Outputs</button>
+              <button type="button" role="tab" data-side-tab="errors" aria-selected="false">Errors <small id="sideErrorCount">0</small></button>
+              <button type="button" role="tab" data-side-tab="logs" aria-selected="false">Logs <small id="sideLogCount">0</small></button>
+            </div>
+            <div id="artifactControls">
+              <p class="artifact-description">
+                Only files consumed by the next step or included in the final result.
+              </p>
+              <label class="artifact-search">
+                <span>⌕</span>
+                <input id="artifactSearch" placeholder="Search outputs…" autocomplete="off">
+              </label>
+            </div>
+            <div class="artifact-list" id="artifactList"></div>
+          </aside>
+        </div>
+      </main>
+    </div>
+
+    <dialog class="preview-dialog" id="previewDialog">
+      <div class="preview-header">
+        <div>
+          <span class="eyebrow">Artifact preview</span>
+          <h2 id="previewTitle">Preview</h2>
+        </div>
+        <button id="closePreview" type="button" aria-label="关闭预览">×</button>
+      </div>
+      <pre id="previewContent"></pre>
+      <div class="preview-footer">
+        <span id="previewPath"></span>
+        <a id="downloadLink" href="#">Download</a>
+      </div>
+    </dialog>
+
+    <div class="toast" id="toast" role="status"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
