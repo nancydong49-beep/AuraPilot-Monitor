@@ -1976,6 +1976,14 @@ button.side-message {
   transform: translateY(-1px);
 }
 
+.artifact-item.missing,
+.artifact-item.missing:hover {
+  cursor: not-allowed;
+  border-color: rgba(184, 59, 53, 0.18);
+  background: var(--red-soft);
+  transform: none;
+}
+
 .file-icon {
   width: 30px;
   height: 30px;
@@ -2012,6 +2020,11 @@ button.side-message {
 .artifact-item > small {
   color: var(--muted);
   font-size: 9px;
+}
+
+.artifact-item > small.missing {
+  color: var(--red);
+  font-weight: 680;
 }
 
 .empty-state {

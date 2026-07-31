@@ -2034,7 +2034,91 @@ class ProjectMonitor:
             )
             if record:
                 records.append(record)
+        known_paths = {record["path"] for record in records}
+        for record in self._run_scoped_manifest_artifacts(run):
+            if record["path"] not in known_paths:
+                records.append(record)
+                known_paths.add(record["path"])
         records.sort(key=lambda item: (item["step_number"], item["relative_path"].lower()))
+        return records
+
+    def _run_scoped_manifest_artifacts(self, run: Path) -> list[dict[str, Any]]:
+        manifest_path = (
+            run
+            / "steps"
+            / "06_partial_library"
+            / "full_downstream_manifest.json"
+        )
+        manifest = _read_json(manifest_path)
+        outputs = manifest.get("outputs")
+        if not manifest_path.is_file() or not isinstance(outputs, dict):
+            return []
+
+        hashes = manifest.get("sha256")
+        hashes = hashes if isinstance(hashes, dict) else {}
+        entries: list[tuple[str, Path, bool]] = [
+            ("full_downstream_manifest", manifest_path, False)
+        ]
+        for key, value in outputs.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                continue
+            try:
+                path = _safe_resolve(run, value)
+            except (OSError, ValueError):
+                continue
+            entries.append((key, path, True))
+
+        records: list[dict[str, Any]] = []
+        seen: set[Path] = set()
+        for key, path, listed_by_manifest in entries:
+            if path in seen:
+                continue
+            seen.add(path)
+            record = self._artifact_record(
+                path,
+                run,
+                step_id="05_final_library",
+                step_label="Step 6",
+                purpose="Final result",
+                source_run=run.name,
+            )
+            sha256 = hashes.get(path.name)
+            metadata = {
+                "artifact_source": "canonical_manifest",
+                "listed_by_manifest": listed_by_manifest,
+                "manifest_key": key,
+                "manifest_path": str(manifest_path),
+                "sha256": sha256 if isinstance(sha256, str) else "",
+                "is_manifest": "manifest" in path.name.lower(),
+            }
+            if record is None:
+                try:
+                    relative = path.relative_to(run)
+                except ValueError:
+                    continue
+                extension = path.suffix.lower()
+                record = {
+                    "name": path.name,
+                    "path": str(path),
+                    "relative_path": str(relative),
+                    "size": None,
+                    "updated_at": "",
+                    "extension": extension.lstrip(".") or "file",
+                    "previewable": False,
+                    "important": True,
+                    "step_id": "05_final_library",
+                    "step_number": 6,
+                    "step_label": "Step 6",
+                    "purpose": "Final result",
+                    "source_run": run.name,
+                    "exists": False,
+                    "empty": False,
+                    "missing": True,
+                }
+            else:
+                record["step_number"] = 6
+            record.update(metadata)
+            records.append(record)
         return records
 
     def _get_partial_status(
@@ -3954,6 +4038,12 @@ class ProjectMonitor:
             "step_label": step_label,
             "purpose": purpose,
             "source_run": source_run,
+            "exists": True,
+            "empty": stat.st_size == 0,
+            "missing": False,
+            "is_manifest": "manifest" in path.name.lower(),
+            "artifact_source": "filesystem",
+            "listed_by_manifest": False,
         }
 
     def _reused_mutation_library_manifest(self, run: Path) -> Path | None:

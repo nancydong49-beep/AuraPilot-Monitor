@@ -1072,6 +1072,8 @@ function manifestArtifact(path, {
   size = null,
   sha256 = "",
   manifestPath = "",
+  isManifest = false,
+  listedByManifest = true,
 } = {}) {
   const runPath = state.run?.run_path || "";
   const name = path.split("/").pop() || path;
@@ -1096,6 +1098,12 @@ function manifestArtifact(path, {
     manifest_key: key,
     manifest_path: manifestPath,
     sha256,
+    exists: true,
+    empty: size === 0,
+    missing: false,
+    is_manifest: isManifest,
+    artifact_source: "canonical_manifest",
+    listed_by_manifest: listedByManifest,
   };
 }
 
@@ -1120,6 +1128,8 @@ async function loadCanonicalManifestArtifacts() {
         key: "full_downstream_manifest",
         size: encodedManifestSize,
         manifestPath,
+        isManifest: true,
+        listedByManifest: false,
       }),
     ];
     const hashes = manifest.sha256 && typeof manifest.sha256 === "object"
@@ -1136,6 +1146,7 @@ async function loadCanonicalManifestArtifacts() {
           : null,
         sha256,
         manifestPath,
+        isManifest: name.toLowerCase().includes("manifest"),
       }));
     });
     state.manifestArtifacts = artifacts;
@@ -1207,23 +1218,39 @@ function renderArtifacts() {
           </span>
         </button>
         <div class="artifact-group-files">
-          ${artifacts.map((artifact) => `
-            <button class="artifact-item" type="button" data-path="${escapeHtml(artifact.path)}"
-              data-previewable="${artifact.previewable ? "1" : "0"}">
-              <span class="file-icon">${escapeHtml(artifact.extension.slice(0, 4))}</span>
-              <span>
-                <strong title="${escapeHtml(artifact.name)}">${escapeHtml(artifact.name)}</strong>
-                <span title="${escapeHtml(artifact.relative_path)}">${
-                  artifact.source_run && artifact.source_run !== state.run.run_id
-                    ? `From ${escapeHtml(artifact.source_run)} · `
-                    : ""
-                }${escapeHtml(artifact.relative_path)}</span>
-              </span>
-              <small>${artifact.size === null || artifact.size === undefined
-                ? "manifest"
-                : formatBytes(artifact.size)}</small>
-            </button>
-          `).join("")}
+          ${artifacts.map((artifact) => {
+            const sourceLabel = artifact.is_manifest
+              ? "Manifest file"
+              : artifact.listed_by_manifest
+                ? "Listed by manifest"
+                : "";
+            const sizeLabel = artifact.missing
+              ? "Missing"
+              : artifact.size === null || artifact.size === undefined
+                ? "Size unavailable"
+                : Number(artifact.size) === 0
+                  ? "0 B · Empty"
+                  : formatBytes(artifact.size);
+            return `
+              <button class="artifact-item ${artifact.missing ? "missing" : ""}" type="button"
+                data-path="${escapeHtml(artifact.path)}"
+                data-previewable="${artifact.previewable && !artifact.missing ? "1" : "0"}"
+                ${artifact.missing ? "disabled" : ""}>
+                <span class="file-icon">${escapeHtml(artifact.extension.slice(0, 4))}</span>
+                <span>
+                  <strong title="${escapeHtml(artifact.name)}">${escapeHtml(artifact.name)}</strong>
+                  <span title="${escapeHtml(artifact.relative_path)}">${
+                    artifact.source_run && artifact.source_run !== state.run.run_id
+                      ? `From ${escapeHtml(artifact.source_run)} · `
+                      : ""
+                  }${escapeHtml(artifact.relative_path)}${
+                    sourceLabel ? ` · ${escapeHtml(sourceLabel)}` : ""
+                  }</span>
+                </span>
+                <small class="${artifact.missing ? "missing" : ""}">${escapeHtml(sizeLabel)}</small>
+              </button>
+            `;
+          }).join("")}
         </div>
       </section>
     `;
