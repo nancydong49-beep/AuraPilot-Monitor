@@ -263,6 +263,13 @@ class ProjectMonitor:
         self.project_root = Path(project_root).resolve()
         self._count_cache: dict[tuple[str, str], tuple[int, int, int]] = {}
         self._summary_cache: dict[tuple[str, str], tuple[int, int, Any]] = {}
+        self._directory_snapshot_cache: dict[
+            tuple[str, str], tuple[int, int, dict[str, Any]]
+        ] = {}
+        self._boltzgen_progress_cache: dict[tuple[str, str], dict[str, Any]] = {}
+        self._boltzgen_workbench_cache: dict[str, list[Path]] = {}
+        self._boltzgen_activity_cache: dict[str, str] = {}
+        self._boltzgen_final_metrics_cache: dict[str, Path] = {}
 
     @staticmethod
     def _active_summary_item(steps: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1100,10 +1107,7 @@ class ProjectMonitor:
         step = self._partial_step_base("03_boltzgen_generation")
         output_root = run / "outputs"
         workbench_root = output_root / "boltzgen" / "workbench"
-        try:
-            workbenches = sorted(path for path in workbench_root.iterdir() if path.is_dir())
-        except OSError:
-            workbenches = []
+        workbenches = self._boltzgen_workbenches(workbench_root)
         per_node = int(
             launch.get("num_designs")
             or library.get("num_designs_per_node")
@@ -1124,7 +1128,6 @@ class ProjectMonitor:
         if not per_node and expected_total:
             per_node = max(1, expected_total // expected_nodes)
         units = []
-        updated_paths: list[Path] = []
         for workbench in workbenches:
             unit_id = self._partial_unit_id(workbench.name)
             substeps = self._boltzgen_substeps(
@@ -1145,12 +1148,15 @@ class ProjectMonitor:
             else:
                 status = "pending"
             evidence = log_path or workbench
-            updated_paths.append(evidence)
+            updated_at = (
+                self._boltzgen_activity_cache.get(str(workbench))
+                or _iso_mtime(evidence)
+            )
             unit = self._partial_unit(
                 unit_id,
                 status,
                 host=unit_id,
-                updated_at=_iso_mtime(evidence),
+                updated_at=updated_at,
             )
             unit["substeps"] = substeps
             unit["error"] = error
@@ -1160,8 +1166,31 @@ class ProjectMonitor:
                     for stage in substeps
                     if stage["status"] in {"running", "failed"}
                 ),
-                substeps[-1]["title"] if substeps else "",
+                next(
+                    (
+                        stage["title"]
+                        for stage in substeps
+                        if stage["status"] != "complete"
+                    ),
+                    substeps[-1]["title"] if substeps else "",
+                ),
             )
+            active_stage = next(
+                (
+                    stage
+                    for stage in substeps
+                    if stage["status"] in {"running", "failed"}
+                ),
+                next(
+                    (
+                        stage
+                        for stage in substeps
+                        if stage["status"] != "complete"
+                    ),
+                    substeps[-1] if substeps else None,
+                ),
+            )
+            unit["progress"] = dict((active_stage or {}).get("progress") or {})
             units.append(unit)
 
         step["units"] = units
@@ -1210,7 +1239,7 @@ class ProjectMonitor:
             ),
         }
         step["updated_at"] = max(
-            (_iso_mtime(path) for path in updated_paths),
+            (unit.get("updated_at") or "" for unit in units),
             default="",
         )
         return step
@@ -1874,6 +1903,15 @@ class ProjectMonitor:
         except OSError:
             return 0.0
 
+    @staticmethod
+    def _path_size(path: Path | None) -> int:
+        if path is None:
+            return 0
+        try:
+            return path.stat().st_size
+        except OSError:
+            return 0
+
     def _run_partial_runtime_evidence(
         self,
         run: Path,
@@ -2351,10 +2389,8 @@ class ProjectMonitor:
         cancelled: bool,
     ) -> dict[str, Any]:
         step = self._partial_step_base("03_boltzgen_generation")
-        workbenches = sorted(
-            path
-            for path in (project / "boltzgen" / "workbench").glob("*")
-            if path.is_dir()
+        workbenches = self._boltzgen_workbenches(
+            project / "boltzgen" / "workbench"
         )
         execution = config.get("execution")
         execution = execution if isinstance(execution, dict) else {}
@@ -2362,7 +2398,6 @@ class ProjectMonitor:
         configured_nodes = configured_nodes if isinstance(configured_nodes, dict) else {}
         node_targets = self._partial_generation_targets(project, config, plan)
         unit_map: dict[str, dict[str, Any]] = {}
-        updated_paths: list[Path] = []
         runtime = plan.get("runtime")
         runtime = runtime if isinstance(runtime, dict) else {}
         termination_outputs = runtime.get("termination_outputs")
@@ -2378,10 +2413,7 @@ class ProjectMonitor:
         for workbench in workbenches:
             unit_id = self._partial_unit_id(workbench.name)
             target = int(node_targets.get(unit_id) or 0)
-            final_metrics = _first_glob(
-                workbench / "final_ranked_designs",
-                "final_designs_metrics_*.csv",
-            )
+            final_metrics = self._boltzgen_final_metrics(workbench)
             substeps = self._boltzgen_substeps(
                 project,
                 workbench,
@@ -2411,12 +2443,15 @@ class ProjectMonitor:
             ):
                 status = "running"
             evidence = final_metrics or workbench
-            updated_paths.append(evidence)
+            updated_at = (
+                self._boltzgen_activity_cache.get(str(workbench))
+                or _iso_mtime(evidence)
+            )
             unit = self._partial_unit(
                 unit_id,
                 status,
                 host=unit_id,
-                updated_at=_iso_mtime(evidence),
+                updated_at=updated_at,
             )
             unit["substeps"] = substeps
             unit["current_stage"] = next(
@@ -2425,8 +2460,31 @@ class ProjectMonitor:
                     for item in substeps
                     if item["status"] in {"running", "failed", "cancelled"}
                 ),
-                substeps[-1]["title"] if substeps else "",
+                next(
+                    (
+                        item["title"]
+                        for item in substeps
+                        if item["status"] != "complete"
+                    ),
+                    substeps[-1]["title"] if substeps else "",
+                ),
             )
+            active_stage = next(
+                (
+                    item
+                    for item in substeps
+                    if item["status"] in {"running", "failed", "cancelled"}
+                ),
+                next(
+                    (
+                        item
+                        for item in substeps
+                        if item["status"] != "complete"
+                    ),
+                    substeps[-1] if substeps else None,
+                ),
+            )
+            unit["progress"] = dict((active_stage or {}).get("progress") or {})
             unit_map[unit_id] = unit
 
         for unit_id, payload in termination_outputs.items():
@@ -2542,13 +2600,30 @@ class ProjectMonitor:
                 for value in (
                     _iso_mtime(project / "execution_plan.json"),
                     _iso_mtime(state_status_path),
-                    *[_iso_mtime(path) for path in updated_paths],
+                    *[
+                        str(unit.get("updated_at") or "")
+                        for unit in units
+                    ],
                 )
                 if value
             ),
             default="",
         )
         return step
+
+    def _boltzgen_workbenches(self, root: Path) -> list[Path]:
+        cache_key = str(root)
+        cached = self._boltzgen_workbench_cache.get(cache_key, [])
+        try:
+            workbenches = sorted(
+                path for path in root.iterdir() if path.is_dir()
+            )
+        except OSError:
+            return list(cached)
+        if workbenches:
+            self._boltzgen_workbench_cache[cache_key] = workbenches
+            return workbenches
+        return list(cached)
 
     def _partial_generation_targets(
         self,
@@ -2610,13 +2685,14 @@ class ProjectMonitor:
         design_override: int = 0,
     ) -> list[dict[str, Any]]:
         all_metrics = workbench / "final_ranked_designs" / "all_designs_metrics.csv"
-        final_metrics = _first_glob(
-            workbench / "final_ranked_designs",
-            "final_designs_metrics_*.csv",
-        )
-        analyzed_rows = self._csv_data_rows(all_metrics)
-        filtered_rows = self._csv_data_rows(final_metrics)
-        total = max(target, design_override, 1)
+        final_metrics = self._boltzgen_final_metrics(workbench)
+        output_progress = self._boltzgen_output_progress(workbench)
+        analyzed_rows = int(output_progress["counts"]["analysis"])
+        filtered_rows = int(output_progress["counts"]["filtering"])
+        activity_values = [
+            str(output_progress.get("updated_at") or ""),
+            _iso_mtime(final_metrics),
+        ]
         stage_definitions = (
             ("design", "Design"),
             ("inverse_folding", "Inverse folding"),
@@ -2626,6 +2702,7 @@ class ProjectMonitor:
         )
 
         if final_metrics is not None:
+            total = max(target, design_override, analyzed_rows, 1)
             stages = []
             for stage_id, title in stage_definitions:
                 stage_total = analyzed_rows if stage_id == "filtering" and analyzed_rows else total
@@ -2653,29 +2730,67 @@ class ProjectMonitor:
                         ),
                     )
                 )
+            latest_activity = max(
+                (value for value in activity_values if value),
+                default="",
+            )
+            if latest_activity:
+                self._boltzgen_activity_cache[str(workbench)] = latest_activity
             return stages
 
         progress = self._boltzgen_log_progress(project, unit_id)
         current_index = int(progress.get("stage_index") or 0)
-        current_fraction = float(progress.get("fraction") or 0.0)
+        output_counts = {
+            stage_id: int(output_progress["counts"].get(stage_id) or 0)
+            for stage_id, _ in stage_definitions
+        }
+        output_index = max(
+            (
+                index
+                for index, (stage_id, _) in enumerate(stage_definitions, 1)
+                if output_counts[stage_id] > 0
+            ),
+            default=0,
+        )
+        active_index = current_index or output_index
+        total = max(
+            target,
+            design_override,
+            int(progress.get("total") or 0),
+            *(output_counts.values()),
+            1,
+        )
         stages = []
         for index, (stage_id, title) in enumerate(stage_definitions, 1):
-            if index < current_index:
+            output_count = min(output_counts[stage_id], total)
+            if index < active_index:
                 completed = total
                 complete_marker = True
                 estimated = False
-            elif index == current_index:
-                completed = round(total * current_fraction)
-                complete_marker = current_fraction >= 1.0
+                started = False
+            elif index == active_index and current_index == index:
+                if progress.get("exact_count"):
+                    completed = min(int(progress.get("completed") or 0), total)
+                else:
+                    completed = round(total * float(progress.get("fraction") or 0.0))
+                complete_marker = float(progress.get("fraction") or 0.0) >= 1.0
                 estimated = bool(progress.get("estimated"))
+                started = bool(progress.get("started", True))
+            elif index == active_index:
+                completed = output_count
+                complete_marker = completed >= total
+                estimated = False
+                started = bool(completed)
             elif stage_id == "design" and design_override:
                 completed = min(design_override, total)
                 complete_marker = completed >= total
                 estimated = False
+                started = bool(completed)
             else:
                 completed = 0
                 complete_marker = False
                 estimated = False
+                started = False
             stage = self._boltzgen_stage(
                 stage_id,
                 title,
@@ -2683,52 +2798,169 @@ class ProjectMonitor:
                 total,
                 cancelled=cancelled,
                 complete_marker=complete_marker,
+                next_started=started,
+                result_count=(
+                    completed
+                    if stage_id == "analysis"
+                    else output_counts["filtering"]
+                    if stage_id == "filtering"
+                    else 0
+                ),
+                result_label=(
+                    "analyzable"
+                    if stage_id == "analysis"
+                    else "retained"
+                    if stage_id == "filtering"
+                    else ""
+                ),
             )
             stage["progress"]["estimated"] = estimated
             stages.append(stage)
+        activity_values.append(str(progress.get("updated_at") or ""))
+        latest_activity = max(
+            (value for value in activity_values if value),
+            default="",
+        )
+        if latest_activity:
+            self._boltzgen_activity_cache[str(workbench)] = latest_activity
         return stages
+
+    def _boltzgen_output_progress(self, workbench: Path) -> dict[str, Any]:
+        inverse_root = workbench / "intermediate_designs_inverse_folded"
+        snapshots = {
+            "design": self._directory_file_snapshot(
+                workbench / "intermediate_designs" / "molecules_out_dir"
+            ),
+            "inverse_folding": self._directory_file_snapshot(
+                inverse_root / "molecules_out_dir"
+            ),
+            "fold_out_npz": self._directory_file_snapshot(
+                inverse_root / "fold_out_npz",
+                suffix=".npz",
+            ),
+            "refold_cif": self._directory_file_snapshot(
+                inverse_root / "refold_cif",
+                suffix=".cif",
+            ),
+        }
+        all_metrics = workbench / "final_ranked_designs" / "all_designs_metrics.csv"
+        final_metrics = self._boltzgen_final_metrics(workbench)
+        counts = {
+            "design": int(snapshots["design"]["count"]),
+            "inverse_folding": int(snapshots["inverse_folding"]["count"]),
+            "folding": min(
+                int(snapshots["fold_out_npz"]["count"]),
+                int(snapshots["refold_cif"]["count"]),
+            ),
+            "analysis": self._csv_data_rows(all_metrics),
+            "filtering": self._csv_data_rows(final_metrics),
+        }
+        updated_at = max(
+            (
+                value
+                for value in (
+                    *[
+                        str(snapshot.get("updated_at") or "")
+                        for snapshot in snapshots.values()
+                    ],
+                    _iso_mtime(all_metrics),
+                    _iso_mtime(final_metrics),
+                )
+                if value
+            ),
+            default="",
+        )
+        return {
+            "counts": counts,
+            "updated_at": updated_at,
+            "read_ok": all(
+                bool(snapshot.get("read_ok")) for snapshot in snapshots.values()
+            ),
+        }
+
+    def _boltzgen_final_metrics(self, workbench: Path) -> Path | None:
+        cache_key = str(workbench)
+        final_metrics = _first_glob(
+            workbench / "final_ranked_designs",
+            "final_designs_metrics_*.csv",
+        )
+        if final_metrics is not None:
+            self._boltzgen_final_metrics_cache[cache_key] = final_metrics
+            return final_metrics
+        return self._boltzgen_final_metrics_cache.get(cache_key)
 
     def _boltzgen_log_progress(
         self,
         project: Path,
         unit_id: str,
     ) -> dict[str, Any]:
+        cache_key = (str(project), unit_id)
+        cached = self._boltzgen_progress_cache.get(cache_key, {})
         candidates = [
-            *sorted(
-                (project / "output" / "generation" / unit_id / "logs").glob(
-                    "*_boltzgen.log"
-                )
-            ),
             project / "logs" / f"boltzgen_generation_{unit_id}.log",
-            *sorted((project / "logs").glob(f"run_*_{unit_id}.log")),
-            *sorted((project / "logs").glob(f"**/run_*_{unit_id}.log")),
         ]
-        path = next((candidate for candidate in candidates if candidate.is_file()), None)
+        for root, pattern in (
+            (project / "generation" / unit_id / "logs", "*_boltzgen.log"),
+            (project / "output" / "generation" / unit_id / "logs", "*_boltzgen.log"),
+            (project / "logs", f"run_*_{unit_id}.log"),
+            (project / "logs", f"**/run_*_{unit_id}.log"),
+        ):
+            try:
+                candidates.extend(sorted(root.glob(pattern)))
+            except OSError:
+                continue
+        existing = [candidate for candidate in candidates if candidate.is_file()]
+        path = max(existing, key=self._path_mtime, default=None)
         if path is None:
-            return {}
+            return dict(cached)
         text = self._tail_text(path, max_bytes=768_000).replace("\r", "\n")
-        pattern = re.compile(
-            r"\[Step\s+(\d+)/5\]\s+([A-Za-z_ ]+?).*?"
-            r"(\d{1,3})%\|.*?\|\s*(\d+)/(\d+)",
+        if not text:
+            return dict(cached)
+        progress_pattern = re.compile(
+            r"(?P<label>Processing samples:\s*)?"
+            r"(?P<percent>\d{1,3})%\|[^\n]*?\|\s*"
+            r"(?P<completed>\d+)\s*/\s*(?P<total>\d+)",
             re.IGNORECASE,
         )
-        matches = list(pattern.finditer(text))
+        matches = list(progress_pattern.finditer(text))
         if matches:
             match = matches[-1]
-            completed_batches = int(match.group(4))
-            total_batches = int(match.group(5))
+            completed = int(match.group("completed"))
+            total = int(match.group("total"))
             fraction = (
-                min(1.0, completed_batches / total_batches)
-                if total_batches
-                else int(match.group(3)) / 100
+                min(1.0, completed / total)
+                if total
+                else int(match.group("percent")) / 100
             )
-            return {
-                "stage_index": int(match.group(1)),
-                "stage": match.group(2).strip().lower(),
+            if match.group("label"):
+                stage_index, stage = 4, "analysis"
+                exact_count = True
+            else:
+                marker = self._boltzgen_stage_marker(
+                    path,
+                    text[:match.start()],
+                    before_offset=max(
+                        0,
+                        self._path_size(path) - 768_000,
+                    ),
+                )
+                stage_index = int(marker.get("stage_index") or 0)
+                stage = str(marker.get("stage") or "")
+                exact_count = False
+            result = {
+                "stage_index": stage_index,
+                "stage": stage,
                 "fraction": fraction,
-                "estimated": True,
+                "completed": completed,
+                "total": total,
+                "exact_count": exact_count,
+                "estimated": not exact_count,
+                "started": True,
                 "updated_at": _iso_mtime(path),
             }
+            if stage_index:
+                self._boltzgen_progress_cache[cache_key] = result
+                return result
         completed_pattern = re.compile(
             r"Step\s+(design|inverse folding|folding|analysis|filtering)"
             r"\s+completed successfully",
@@ -2744,13 +2976,147 @@ class ProjectMonitor:
                 "filtering": 5,
             }
             index = names.get(completed[-1].group(1).lower(), 0)
-            return {
+            result = {
                 "stage_index": index,
                 "fraction": 1.0,
                 "estimated": False,
+                "started": True,
                 "updated_at": _iso_mtime(path),
             }
+            self._boltzgen_progress_cache[cache_key] = result
+            return result
+        marker = self._boltzgen_stage_marker(path, text)
+        if marker:
+            result = {
+                **marker,
+                "fraction": 0.0,
+                "estimated": False,
+                "started": True,
+                "updated_at": _iso_mtime(path),
+            }
+            self._boltzgen_progress_cache[cache_key] = result
+            return result
+        return dict(cached)
+
+    def _boltzgen_stage_marker(
+        self,
+        path: Path,
+        known_text: str = "",
+        *,
+        before_offset: int | None = None,
+    ) -> dict[str, Any]:
+        marker = self._boltzgen_stage_marker_from_text(known_text)
+        if marker:
+            return marker
+        try:
+            size = path.stat().st_size
+            with path.open("rb") as handle:
+                chunk_size = 1024 * 1024
+                cursor = min(size, before_offset) if before_offset is not None else size
+                scanned = 0
+                while cursor > 0 and scanned < 64 * 1024 * 1024:
+                    start = max(0, cursor - chunk_size)
+                    handle.seek(start)
+                    read_start = max(0, start - 256)
+                    handle.seek(read_start)
+                    text = handle.read(cursor - read_start).decode(
+                        "utf-8",
+                        errors="replace",
+                    )
+                    marker = self._boltzgen_stage_marker_from_text(
+                        text.replace("\r", "\n")
+                    )
+                    if marker:
+                        return marker
+                    scanned += cursor - start
+                    cursor = start
+        except OSError:
+            return {}
         return {}
+
+    @staticmethod
+    def _boltzgen_stage_marker_from_text(text: str) -> dict[str, Any]:
+        matches: list[tuple[int, int, str]] = []
+        for match in re.finditer(
+            r"\[Step\s+([1-5])/5\]\s+([A-Za-z_ ]+?)(?:\s+-|:|\n|$)",
+            text,
+            re.IGNORECASE,
+        ):
+            matches.append(
+                (
+                    match.start(),
+                    int(match.group(1)),
+                    match.group(2).strip().lower(),
+                )
+            )
+        for match in re.finditer(
+            r"Initializing\s+FromGeneratedDataModule\s+datasets",
+            text,
+            re.IGNORECASE,
+        ):
+            matches.append((match.start(), 4, "analysis"))
+        if not matches:
+            return {}
+        _, stage_index, stage = max(matches, key=lambda item: item[0])
+        return {
+            "stage_index": stage_index,
+            "stage": stage,
+        }
+
+    def _directory_file_snapshot(
+        self,
+        directory: Path,
+        *,
+        suffix: str = "",
+        prefix: str = "",
+    ) -> dict[str, Any]:
+        cache_key = (str(directory), f"{prefix}*{suffix}")
+        cached_entry = self._directory_snapshot_cache.get(cache_key)
+        try:
+            stat = directory.stat()
+        except FileNotFoundError:
+            return {"count": 0, "updated_at": "", "read_ok": True}
+        except OSError:
+            if cached_entry:
+                return {**cached_entry[2], "read_ok": False, "cached": True}
+            return {"count": 0, "updated_at": "", "read_ok": False}
+        if cached_entry and cached_entry[:2] == (stat.st_mtime_ns, stat.st_size):
+            return dict(cached_entry[2])
+        count = 0
+        latest_mtime = 0.0
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    if (
+                        not entry.is_file(follow_symlinks=False)
+                        or not entry.name.startswith(prefix)
+                        or not entry.name.endswith(suffix)
+                    ):
+                        continue
+                    entry_stat = entry.stat(follow_symlinks=False)
+                    count += 1
+                    latest_mtime = max(latest_mtime, entry_stat.st_mtime)
+        except FileNotFoundError:
+            return {"count": 0, "updated_at": "", "read_ok": True}
+        except OSError:
+            if cached_entry:
+                return {**cached_entry[2], "read_ok": False, "cached": True}
+            return {"count": 0, "updated_at": "", "read_ok": False}
+        snapshot = {
+            "count": count,
+            "updated_at": (
+                datetime.fromtimestamp(latest_mtime, timezone.utc).isoformat()
+                if latest_mtime
+                else ""
+            ),
+            "read_ok": True,
+        }
+        self._directory_snapshot_cache[cache_key] = (
+            stat.st_mtime_ns,
+            stat.st_size,
+            snapshot,
+        )
+        return dict(snapshot)
 
     def _tail_text(self, path: Path, *, max_bytes: int) -> str:
         try:
@@ -2925,21 +3291,29 @@ class ProjectMonitor:
         return count
 
     def _csv_data_rows(self, path: Path | None) -> int:
-        if path is None or not path.is_file():
-            return 0
-        try:
-            stat = path.stat()
-        except OSError:
+        if path is None:
             return 0
         cache_key = (str(path), "csv_rows")
         cached = self._count_cache.get(cache_key)
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            return 0
+        except OSError:
+            return cached[2] if cached else 0
         if cached and cached[:2] == (stat.st_mtime_ns, stat.st_size):
             return cached[2]
         try:
             with path.open("rb") as handle:
-                rows = sum(chunk.count(b"\n") for chunk in iter(lambda: handle.read(1024 * 1024), b""))
+                rows = 0
+                last_byte = b""
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    rows += chunk.count(b"\n")
+                    last_byte = chunk[-1:]
         except OSError:
-            return 0
+            return cached[2] if cached else 0
+        if stat.st_size and last_byte != b"\n":
+            rows += 1
         rows = max(rows - 1, 0)
         self._count_cache[cache_key] = (stat.st_mtime_ns, stat.st_size, rows)
         return rows
