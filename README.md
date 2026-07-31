@@ -18,6 +18,17 @@ downstream errors, and final-library state.
 The monitor reads existing AuraPilot/AureZoo JSON files and artifacts. It does
 not launch, resume, cancel, or modify workflow jobs.
 
+For run-scoped Partial de novo projects, the UI discovers final-library
+deliverables from the canonical manifest:
+
+```text
+steps/06_partial_library/full_downstream_manifest.json
+```
+
+Only paths listed under the manifest's `outputs` object and contained within
+the selected run root are exposed. The UI does not require compatibility
+directories or symbolic links such as `steps/06_partial_library_design`.
+
 ## Run
 
 From the AuraPilot repository root:

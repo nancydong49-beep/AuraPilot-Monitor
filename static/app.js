@@ -21,6 +21,7 @@ const state = {
   healthByServer: {},
   runs: [],
   run: null,
+  manifestArtifacts: [],
   project: "",
   runId: "",
   serverFilter: "ln",
@@ -557,6 +558,7 @@ async function refreshRun() {
       `/api/projects/${encodeURIComponent(state.project)}/runs/${encodeURIComponent(state.runId)}/status`,
       state.activeServerId,
     );
+    await loadCanonicalManifestArtifacts();
     renderRun();
   } catch (error) {
     showToast(error.message);
@@ -1065,6 +1067,84 @@ function appendAttemptHistory() {
   `);
 }
 
+function manifestArtifact(path, {
+  key = "",
+  size = null,
+  sha256 = "",
+  manifestPath = "",
+} = {}) {
+  const runPath = state.run?.run_path || "";
+  const name = path.split("/").pop() || path;
+  const extension = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+  const relativePath = runPath && path.startsWith(`${runPath}/`)
+    ? path.slice(runPath.length + 1)
+    : path;
+  return {
+    name,
+    path,
+    relative_path: relativePath,
+    size,
+    updated_at: state.run?.updated_at || "",
+    extension,
+    previewable: ["json", "yaml", "yml", "txt", "md"].includes(extension),
+    important: true,
+    step_id: "05_final_library",
+    step_number: 6,
+    step_label: "Step 6",
+    purpose: "Final result",
+    source_run: state.run?.run_id || "",
+    manifest_key: key,
+    manifest_path: manifestPath,
+    sha256,
+  };
+}
+
+async function loadCanonicalManifestArtifacts() {
+  state.manifestArtifacts = [];
+  const runPath = state.run?.run_path || "";
+  if (!runPath || state.run?.workflow_family !== "partial_denovo") return;
+
+  const manifestPath = `${runPath}/steps/06_partial_library/full_downstream_manifest.json`;
+  try {
+    const payload = await api(
+      `/api/file?path=${encodeURIComponent(manifestPath)}`,
+      state.activeServerId,
+    );
+    const manifest = JSON.parse(payload.content);
+    const outputs = manifest.outputs;
+    if (!outputs || typeof outputs !== "object" || Array.isArray(outputs)) return;
+
+    const encodedManifestSize = new TextEncoder().encode(payload.content || "").length;
+    const artifacts = [
+      manifestArtifact(manifestPath, {
+        key: "full_downstream_manifest",
+        size: encodedManifestSize,
+        manifestPath,
+      }),
+    ];
+    const hashes = manifest.sha256 && typeof manifest.sha256 === "object"
+      ? manifest.sha256
+      : {};
+    Object.entries(outputs).forEach(([key, path]) => {
+      if (typeof path !== "string" || !path.startsWith(`${runPath}/`)) return;
+      const name = path.split("/").pop() || path;
+      const sha256 = typeof hashes[name] === "string" ? hashes[name] : "";
+      artifacts.push(manifestArtifact(path, {
+        key,
+        size: sha256 === "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          ? 0
+          : null,
+        sha256,
+        manifestPath,
+      }));
+    });
+    state.manifestArtifacts = artifacts;
+  } catch (error) {
+    // Incomplete runs may not have a final manifest yet.
+    state.manifestArtifacts = [];
+  }
+}
+
 function renderArtifacts() {
   const errors = collectSideErrors();
   const logs = collectSideLogs();
@@ -1090,7 +1170,12 @@ function renderArtifacts() {
     return;
   }
   elements.sidePanelTitle.textContent = "Workflow deliverables";
-  const all = state.run?.artifacts || [];
+  const listed = state.run?.artifacts || [];
+  const knownPaths = new Set(listed.map((artifact) => artifact.path));
+  const all = [
+    ...listed,
+    ...state.manifestArtifacts.filter((artifact) => !knownPaths.has(artifact.path)),
+  ];
   const query = state.artifactSearch.toLowerCase();
   const visible = all.filter((artifact) => (
     !query
@@ -1134,7 +1219,9 @@ function renderArtifacts() {
                     : ""
                 }${escapeHtml(artifact.relative_path)}</span>
               </span>
-              <small>${formatBytes(artifact.size)}</small>
+              <small>${artifact.size === null || artifact.size === undefined
+                ? "manifest"
+                : formatBytes(artifact.size)}</small>
             </button>
           `).join("")}
         </div>
