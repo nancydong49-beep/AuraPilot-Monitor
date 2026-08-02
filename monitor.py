@@ -76,6 +76,7 @@ FALLBACK_EXPECTED_OUTPUTS = {
         "outputs/output/library_design/<task>_expression_selected_structures/manifest.csv",
         "outputs/output/library_design/<task>_expression_selected_structures.tar.gz",
         "outputs/output/library_design/<task>_library_design_manifest.json",
+        "outputs/output/library_design/<task>_library_design_deliverables/",
         "outputs/output/<task>_inverse_folding_library_design_manifest.json",
     ],
 }
@@ -807,6 +808,12 @@ class ProjectMonitor:
                     if path.is_file():
                         selected.setdefault(path, (step_id, "summary"))
 
+        # Some profiles declare individual step-5 files but write the complete
+        # handoff package into a task-prefixed deliverables directory.  Always
+        # expose that canonical package without scanning intermediate trees.
+        for path in self._ifld_library_design_deliverables(run):
+            selected.setdefault(path, ("05_library_design", "final_deliverable"))
+
         if not any(step_id == "03_mutation_library" for step_id, _ in selected.values()):
             reused_manifest = self._reused_mutation_library_manifest(run)
             if reused_manifest is not None:
@@ -862,6 +869,39 @@ class ProjectMonitor:
             )
         )
         return records
+
+    @staticmethod
+    def _ifld_library_design_deliverables(run: Path) -> list[Path]:
+        design_root = run / "outputs" / "output" / "library_design"
+        try:
+            directories = sorted(
+                path
+                for path in design_root.glob("*_library_design_deliverables")
+                if path.is_dir()
+            )
+        except OSError:
+            return []
+
+        files: list[Path] = []
+        try:
+            resolved_run = run.resolve()
+        except OSError:
+            return []
+        for directory in directories:
+            try:
+                candidates = sorted(directory.rglob("*"))
+            except OSError:
+                continue
+            for path in candidates:
+                try:
+                    resolved = path.resolve()
+                    resolved.relative_to(resolved_run)
+                    is_file = path.is_file()
+                except (OSError, ValueError):
+                    continue
+                if is_file:
+                    files.append(path)
+        return files
 
     @staticmethod
     def _is_partial_denovo(project: Path) -> bool:
