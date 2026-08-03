@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import ipaddress
 import json
 import threading
 import unittest
@@ -9,7 +10,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from monitor_dashboard.gateway import GatewayHandler
+from monitor_dashboard.gateway import (
+    DEFAULT_PRIVATE_NETWORKS,
+    GatewayHandler,
+    parse_allowed_networks,
+)
 
 
 class UpstreamHandler(BaseHTTPRequestHandler):
@@ -62,6 +67,7 @@ class GatewayTests(unittest.TestCase):
         }
         GatewayHandler.auth_user = ""
         GatewayHandler.auth_password = ""
+        GatewayHandler.allowed_networks = DEFAULT_PRIVATE_NETWORKS
         GatewayHandler.upstream_timeout = 2
         self.gateway = ThreadingHTTPServer(("127.0.0.1", 0), GatewayHandler)
         self.gateway.daemon_threads = True
@@ -120,6 +126,18 @@ class GatewayTests(unittest.TestCase):
         with urlopen(request, timeout=2) as response:
             payload = json.load(response)
         self.assertEqual(payload["status"], "ok")
+
+    def test_allowed_networks_default_to_private_clients(self) -> None:
+        networks = parse_allowed_networks([])
+
+        self.assertTrue(any(ipaddress.ip_address("192.168.1.5") in network for network in networks))
+        self.assertFalse(any(ipaddress.ip_address("8.8.8.8") in network for network in networks))
+
+    def test_public_cidr_can_be_enabled_explicitly(self) -> None:
+        networks = parse_allowed_networks(["0.0.0.0/0", "::/0"])
+
+        self.assertTrue(any(ipaddress.ip_address("8.8.8.8") in network for network in networks))
+        self.assertTrue(any(ipaddress.ip_address("2001:4860:4860::8888") in network for network in networks))
 
 
 if __name__ == "__main__":

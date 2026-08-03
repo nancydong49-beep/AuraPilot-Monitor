@@ -85,6 +85,28 @@ Keep the gateway computer awake and keep both SSH tunnels running. Restrict
 port `8780` with the host firewall when the surrounding network is not fully
 trusted.
 
+## Direct public-port deployment
+
+When a host firewall or cloud security group already exposes a selected port,
+public clients must be allowed explicitly and HTTP Basic Auth should be enabled:
+
+```bash
+export AURAPILOT_MONITOR_PASSWORD='replace-with-a-strong-password'
+python3 -m monitor_dashboard.gateway \
+  --host 0.0.0.0 \
+  --port 8888 \
+  --ln-url http://127.0.0.1:8766 \
+  --huoshan-url http://127.0.0.1:8765 \
+  --allow-cidr 0.0.0.0/0 \
+  --allow-cidr ::/0 \
+  --auth-user monitor
+```
+
+This direct form serves plain HTTP, so Basic Auth credentials and dashboard
+traffic are not encrypted in transit. For long-term or multi-user deployment,
+put the gateway behind an HTTPS reverse proxy with a domain and trusted TLS
+certificate. Keep the two collector services bound to loopback.
+
 A macOS `launchd` template is available at
 `deploy/macos/com.aurapilot.monitor-gateway.plist.example`. Replace its three
 placeholders with the Python executable, repository, and log-directory paths

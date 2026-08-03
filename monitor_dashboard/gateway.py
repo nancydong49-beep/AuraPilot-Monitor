@@ -33,6 +33,15 @@ FORWARDED_HEADERS = {
 }
 
 
+def parse_allowed_networks(
+    values: list[str],
+) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    """Return explicitly configured client networks or the private defaults."""
+    if not values:
+        return DEFAULT_PRIVATE_NETWORKS
+    return tuple(ipaddress.ip_network(value, strict=False) for value in values)
+
+
 class GatewayHandler(BaseHTTPRequestHandler):
     upstreams: dict[str, dict[str, str]] = {}
     allowed_networks = DEFAULT_PRIVATE_NETWORKS
@@ -205,15 +214,30 @@ class GatewayHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="AuraPilot LAN monitoring gateway")
+    parser = argparse.ArgumentParser(description="AuraPilot monitoring gateway")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8780)
     parser.add_argument("--ln-url", default="http://127.0.0.1:8765")
     parser.add_argument("--huoshan-url", default="http://127.0.0.1:8766")
     parser.add_argument("--auth-user", default="")
     parser.add_argument("--auth-password-env", default="AURAPILOT_MONITOR_PASSWORD")
+    parser.add_argument(
+        "--allow-cidr",
+        action="append",
+        default=[],
+        metavar="CIDR",
+        help=(
+            "client network allowed to use the gateway; repeat for multiple networks "
+            "(defaults to loopback and private networks)"
+        ),
+    )
     parser.add_argument("--upstream-timeout", type=float, default=30.0)
     args = parser.parse_args()
+
+    try:
+        allowed_networks = parse_allowed_networks(args.allow_cidr)
+    except ValueError as exc:
+        parser.error(f"invalid --allow-cidr value: {exc}")
 
     password = os.environ.get(args.auth_password_env, "") if args.auth_user else ""
     if args.auth_user and not password:
@@ -230,11 +254,12 @@ def main() -> None:
     }
     GatewayHandler.auth_user = args.auth_user
     GatewayHandler.auth_password = password
+    GatewayHandler.allowed_networks = allowed_networks
     GatewayHandler.upstream_timeout = args.upstream_timeout
     server = ThreadingHTTPServer((args.host, args.port), GatewayHandler)
     server.daemon_threads = True
     print(
-        f"AuraPilot LAN gateway: http://{args.host}:{args.port} "
+        f"AuraPilot gateway: http://{args.host}:{args.port} "
         f"(authentication: {'enabled' if args.auth_user else 'disabled'})",
         flush=True,
     )
