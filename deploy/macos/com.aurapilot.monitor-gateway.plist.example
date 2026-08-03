@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.aurapilot.monitor-gateway</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__PYTHON__</string>
+    <string>-m</string>
+    <string>monitor_dashboard.gateway</string>
+    <string>--host</string>
+    <string>0.0.0.0</string>
+    <string>--port</string>
+    <string>8780</string>
+    <string>--ln-url</string>
+    <string>http://127.0.0.1:8765</string>
+    <string>--huoshan-url</string>
+    <string>http://127.0.0.1:8766</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__REPOSITORY__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>__REPOSITORY__</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__LOG_DIRECTORY__/gateway.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIRECTORY__/gateway.error.log</string>
+</dict>
+</plist>

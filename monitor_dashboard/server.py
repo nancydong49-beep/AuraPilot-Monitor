@@ -22,6 +22,13 @@ class MonitorHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         try:
+            if parsed.path == "/runtime-config.js":
+                self._javascript(
+                    "window.AURA_MONITOR_RUNTIME = "
+                    + json.dumps({"mode": "collector"}, ensure_ascii=False)
+                    + ";\n"
+                )
+                return
             if parsed.path == "/api/health":
                 self._json(
                     {
@@ -80,6 +87,15 @@ class MonitorHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _javascript(self, source: str) -> None:
+        body = source.encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/javascript; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

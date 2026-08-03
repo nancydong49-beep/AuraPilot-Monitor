@@ -47,6 +47,51 @@ The unified frontend expects:
 For the current setup, start one collector on each server at its own loopback
 port `8765`, then forward those ports to `8765` and `8766` on the client.
 
+## Share on a trusted LAN
+
+Run the gateway on the computer that owns both SSH tunnels:
+
+```bash
+python3 -m monitor_dashboard.gateway \
+  --host 0.0.0.0 \
+  --port 8780 \
+  --ln-url http://127.0.0.1:8765 \
+  --huoshan-url http://127.0.0.1:8766
+```
+
+Colleagues on the same private network can then open:
+
+```text
+http://<gateway-computer-LAN-IP>:8780
+```
+
+The browser talks only to port `8780`. The gateway forwards same-origin
+`/collector/ln/api/...` and `/collector/huoshan/api/...` requests through the
+existing local SSH tunnels. Remote collectors remain bound to loopback and are
+not exposed to the LAN.
+
+By default the gateway accepts only loopback, RFC1918 IPv4, and private IPv6
+clients. It does not enable a password automatically. To add HTTP Basic Auth,
+put the password in an environment variable rather than on the command line:
+
+```bash
+export AURAPILOT_MONITOR_PASSWORD='replace-with-a-strong-password'
+python3 -m monitor_dashboard.gateway \
+  --auth-user monitor \
+  --auth-password-env AURAPILOT_MONITOR_PASSWORD
+```
+
+Keep the gateway computer awake and keep both SSH tunnels running. Restrict
+port `8780` with the host firewall when the surrounding network is not fully
+trusted.
+
+A macOS `launchd` template is available at
+`deploy/macos/com.aurapilot.monitor-gateway.plist.example`. Replace its three
+placeholders with the Python executable, repository, and log-directory paths
+before installing it under `~/Library/LaunchAgents`. Because macOS may block
+background services from reading `Documents`, deploy the launchd runtime copy
+under a non-protected path such as `~/.local/share/AuraPilot-Monitor`.
+
 ## Development
 
 Run the monitor regression suite:

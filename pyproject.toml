@@ -12,6 +12,7 @@ dependencies = []
 
 [project.scripts]
 aurapilot-monitor = "monitor_dashboard.server:main"
+aurapilot-monitor-gateway = "monitor_dashboard.gateway:main"
 
 [tool.setuptools]
 include-package-data = true

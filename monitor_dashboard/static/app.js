@@ -2,7 +2,7 @@ const loopbackHost = ["127.0.0.1", "localhost"].includes(window.location.hostnam
   ? window.location.hostname
   : "127.0.0.1";
 
-const servers = [
+const fallbackServers = [
   {
     id: "ln",
     label: "LN",
@@ -14,6 +14,11 @@ const servers = [
     apiBase: `http://${loopbackHost}:8766`,
   },
 ];
+
+const runtimeServers = window.AURA_MONITOR_RUNTIME?.servers;
+const servers = Array.isArray(runtimeServers) && runtimeServers.length
+  ? runtimeServers
+  : fallbackServers;
 
 const state = {
   projects: [],
