@@ -1890,6 +1890,27 @@ button.side-message {
   gap: 6px;
 }
 
+.artifact-group.final-deliverables {
+  margin-bottom: 4px;
+  border: 1px solid rgba(15, 123, 107, 0.2);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(231, 246, 241, 0.72), rgba(255, 255, 255, 0));
+  padding: 10px;
+}
+
+.artifact-group.final-deliverables .artifact-group-heading > span::before {
+  content: "✓";
+  display: inline-grid;
+  width: 17px;
+  height: 17px;
+  margin-right: 6px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--teal-soft);
+  color: var(--teal);
+  font-size: 10px;
+}
+
 .artifact-group-heading {
   width: 100%;
   display: grid;

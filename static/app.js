@@ -1192,6 +1192,8 @@ function renderArtifacts() {
     !query
     || artifact.relative_path.toLowerCase().includes(query)
     || artifact.step_label.toLowerCase().includes(query)
+    || (artifact.group_label || "").toLowerCase().includes(query)
+    || (artifact.group_purpose || "").toLowerCase().includes(query)
   ));
   elements.artifactCount.textContent = `${all.length} files`;
   if (!visible.length) {
@@ -1199,19 +1201,26 @@ function renderArtifacts() {
     return;
   }
   const groups = visible.reduce((result, artifact) => {
-    (result[artifact.step_id] ||= []).push(artifact);
+    const groupId = artifact.group_id || artifact.step_id;
+    (result[groupId] ||= []).push(artifact);
     return result;
   }, {});
   elements.artifactList.innerHTML = Object.values(groups).map((artifacts) => {
     const first = artifacts[0];
-    const collapsed = state.collapsedArtifactGroups.has(first.step_id);
+    const groupId = first.group_id || first.step_id;
+    const groupLabel = first.group_label || first.step_label;
+    const groupPurpose = first.group_purpose || first.purpose;
+    const isFinalDeliverable = first.artifact_category === "final_deliverable";
+    const collapsed = state.collapsedArtifactGroups.has(groupId);
     return `
-      <section class="artifact-group${collapsed ? " collapsed" : ""}">
+      <section class="artifact-group${collapsed ? " collapsed" : ""}${
+        isFinalDeliverable ? " final-deliverables" : ""
+      }">
         <button class="artifact-group-heading" type="button"
-          data-artifact-group="${escapeHtml(first.step_id)}"
+          data-artifact-group="${escapeHtml(groupId)}"
           aria-expanded="${collapsed ? "false" : "true"}">
-          <span>${escapeHtml(first.step_label)}</span>
-          <strong>${escapeHtml(first.purpose)}</strong>
+          <span>${escapeHtml(groupLabel)}</span>
+          <strong>${escapeHtml(groupPurpose)}</strong>
           <span class="artifact-group-meta">
             <small class="artifact-group-count">${artifacts.length}</small>
             <span class="artifact-group-chevron" aria-hidden="true">▴</span>

@@ -50,7 +50,14 @@ ARTIFACT_STEP_META = {
     "02_structure_clustering": ("Step 2", "Next-step input"),
     "03_mutation_library": ("Step 3", "Next-step input"),
     "04_candidate_filter": ("Step 4", "Next-step input"),
-    "05_library_design": ("Step 5", "Final result"),
+    "05_library_design": ("Step 5", "Step output"),
+}
+
+FINAL_DELIVERABLE_GROUP = {
+    "id": "ifld_final_deliverables",
+    "label": "Final deliverables",
+    "purpose": "Ready for delivery",
+    "order": 0,
 }
 
 FALLBACK_EXPECTED_OUTPUTS = {
@@ -811,8 +818,11 @@ class ProjectMonitor:
         # Some profiles declare individual step-5 files but write the complete
         # handoff package into a task-prefixed deliverables directory.  Always
         # expose that canonical package without scanning intermediate trees.
+        # Assignment is intentional: these files may already have been found
+        # through the declared step-5 directory and must be promoted out of the
+        # ordinary step-output group.
         for path in self._ifld_library_design_deliverables(run):
-            selected.setdefault(path, ("05_library_design", "final_deliverable"))
+            selected[path] = ("05_library_design", "final_deliverable")
 
         if not any(step_id == "03_mutation_library" for step_id, _ in selected.values()):
             reused_manifest = self._reused_mutation_library_manifest(run)
@@ -840,8 +850,22 @@ class ProjectMonitor:
                 purpose = "Step summary"
             elif role == "reused_output":
                 purpose = "Reused next-step input"
+            elif role == "final_deliverable":
+                purpose = FINAL_DELIVERABLE_GROUP["purpose"]
             else:
                 purpose = default_purpose
+            if role == "final_deliverable":
+                group_id = FINAL_DELIVERABLE_GROUP["id"]
+                group_label = FINAL_DELIVERABLE_GROUP["label"]
+                group_purpose = FINAL_DELIVERABLE_GROUP["purpose"]
+                group_order = FINAL_DELIVERABLE_GROUP["order"]
+                artifact_category = "final_deliverable"
+            else:
+                group_id = step_id
+                group_label = step_label
+                group_purpose = purpose
+                group_order = int(step_id[:2])
+                artifact_category = "step_output"
             records.append(
                 {
                     "name": path.name,
@@ -859,11 +883,17 @@ class ProjectMonitor:
                     "step_number": int(step_id[:2]),
                     "step_label": step_label,
                     "purpose": purpose,
+                    "artifact_category": artifact_category,
+                    "group_id": group_id,
+                    "group_label": group_label,
+                    "group_purpose": group_purpose,
+                    "group_order": group_order,
                     "source_run": source_run,
                 }
             )
         records.sort(
             key=lambda item: (
+                item["group_order"],
                 item["step_number"],
                 item["relative_path"].lower(),
             )
