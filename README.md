@@ -1,78 +1,81 @@
-# AuraPilot Monitor Dashboard
+# AuraPilot Monitor
 
-Read-only Web dashboard for inspecting projects under `/nfs/project`.
+Standalone, read-only Web dashboard for monitoring AuraPilot, AureZoo, IFLD,
+and Partial de novo/BoltzGen workflow outputs. The monitor reads existing
+project directories; it never launches, resumes, cancels, or modifies jobs.
 
-The dashboard supports the six-stage IFLD view:
+## Supported workflows
 
-1. Initialize and validate.
-2. Structure prediction.
-3. Structure clustering.
-4. Mutation library and scoring.
-5. Refolding and candidate filtering.
-6. Library design.
+- Six-stage IFLD execution, errors, logs, progress, and canonical outputs.
+- Dedicated IFLD final-deliverables group for
+  `outputs/output/library_design/*_library_design_deliverables`.
+- Flat and run-scoped Partial de novo/BoltzGen projects.
+- Per-node Design, Inverse folding, Folding, Analysis, and Filtering progress.
+- Downstream screening shards, aggregation, and final-library state.
+- Multiple read-only collectors displayed through one browser page.
 
-It also recognizes flat and run-scoped Partial de novo/BoltzGen projects,
-including per-node Design, Inverse folding, Folding, Analysis, Filtering,
-downstream errors, and final-library state.
+The code has no runtime dependency on the AuraPilot or AureZoo Python package.
+It only requires Python 3.9 or newer and filesystem access to the project root.
 
-The monitor reads existing AuraPilot/AureZoo JSON files and artifacts. It does
-not launch, resume, cancel, or modify workflow jobs.
+## Run a collector
 
-For run-scoped Partial de novo projects, the UI discovers final-library
-deliverables from the canonical manifest:
-
-```text
-steps/06_partial_library/full_downstream_manifest.json
-```
-
-Only paths listed under the manifest's `outputs` object and contained within
-the selected run root are exposed. The UI does not require compatibility
-directories or symbolic links such as `steps/06_partial_library_design`.
-
-## Run
-
-From the AuraPilot repository root:
+From this repository:
 
 ```bash
-python3 -m apps.monitor_dashboard.server \
+python3 -m monitor_dashboard.server \
   --host 127.0.0.1 \
   --port 8765 \
   --project-root /nfs/project \
-  --server-id ln \
-  --server-label LN
+  --server-id huoshan \
+  --server-label Huoshan_A800
 ```
 
-Open `http://127.0.0.1:8765`. For a remote server, keep the service bound to
-localhost and use an SSH tunnel.
-
-The unified UI expects LN on local port `8765` and Huoshan A800 on local port
-`8766`. Each collector exposes read-only CORS-enabled APIs so a single page can
-switch between both data sources or show their combined project list.
-
-The dashboard refreshes the selected run every five seconds. It distinguishes
-`complete`, `running`, `failed`, `blocked`, `degraded`, `reused`, `skipped`,
-and `pending` states.
-
-## Reported progress
-
-Without an explicit report, the dashboard derives counts from workflow outputs
-and labels them `Estimated from outputs`. A workflow can publish an atomic
-`progress.json` at the run/project root or under `status/`,
-`postprocess/status/`, or `state/`:
+The equivalent installed command is:
 
 ```bash
-python3 scripts/progressctl.py \
-  --path /nfs/project/example/postprocess/status/progress.json \
-  start --workflow partial_denovo --node ln01 --attempt 2 \
-  --stage developability_filter
-
-python3 scripts/progressctl.py \
-  --path /nfs/project/example/postprocess/status/progress.json \
-  stage --stage af3_refolding --title "AF3 refolding" \
-  --completed 126 --total 353
+aurapilot-monitor --host 127.0.0.1 --port 8765 \
+  --project-root /nfs/project --server-id huoshan \
+  --server-label Huoshan_A800
 ```
 
-The reporter uses a lock plus same-directory atomic rename, records attempt
-history, emits heartbeat timestamps, and calculates an ETA after consecutive
-updates. Reported progress is preferred over filesystem inference. A running
-report with no heartbeat for five minutes is shown as stalled.
+Keep remote collectors bound to `127.0.0.1` and reach them through SSH tunnels.
+The unified frontend expects:
+
+- LN collector on local port `8765`.
+- Huoshan collector on local port `8766`.
+
+For the current setup, start one collector on each server at its own loopback
+port `8765`, then forward those ports to `8765` and `8766` on the client.
+
+## Development
+
+Run the monitor regression suite:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py'
+```
+
+Install in editable mode when desired:
+
+```bash
+python3 -m pip install -e .
+```
+
+## Progress data
+
+When workflows do not publish a progress report, the dashboard derives counts
+from logs and output files and labels them `Estimated from outputs`.
+
+For precise reporting, a workflow may atomically publish `progress.json` at the
+run or project root, or under `status/`, `postprocess/status/`, or `state/`.
+Reported progress takes priority over filesystem inference. A running report
+whose heartbeat is older than five minutes is shown as stalled.
+
+## Security
+
+- The service is read-only with respect to monitored projects.
+- File preview and download paths are constrained to the configured project
+  root.
+- Do not commit project data, logs, credentials, private configuration, or
+  biological sequence files to this repository.
+- Keep this repository private when it contains internal topology or naming.

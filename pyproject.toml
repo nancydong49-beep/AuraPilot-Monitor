@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aurapilot-monitor"
+version = "0.1.0"
+description = "Standalone read-only workflow monitoring dashboard"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+aurapilot-monitor = "monitor_dashboard.server:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["monitor_dashboard*"]
+
+[tool.setuptools.package-data]
+monitor_dashboard = ["static/*"]

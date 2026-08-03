@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Never commit monitored project data or local runtime output.
+projects/
+runs/
+logs/
+*.log
+.env
+.env.*
+!.env.example
