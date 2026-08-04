@@ -1,0 +1,13 @@
+[Unit]
+Description=AuraPilot direct Huoshan-to-LN monitoring tunnel
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh -N -T -i /home/dongss/.ssh/id_ed25519_aurapilot_monitor -p 60022 -L 127.0.0.1:8767:127.0.0.1:8765 -o BatchMode=yes -o ExitOnForwardFailure=yes -o IdentitiesOnly=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 dongss@211.141.18.186
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

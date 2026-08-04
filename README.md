@@ -107,6 +107,25 @@ traffic are not encrypted in transit. For long-term or multi-user deployment,
 put the gateway behind an HTTPS reverse proxy with a domain and trusted TLS
 certificate. Keep the two collector services bound to loopback.
 
+### Direct Huoshan-to-LN tunnel
+
+To keep the public gateway independent of a workstation, Huoshan can forward a
+loopback-only port directly to the LN collector over SSH. Install the dedicated
+public key on LN with permission to open `127.0.0.1:8765`, then install
+`deploy/linux/aurapilot-ln-tunnel.service` as a Huoshan user service:
+
+```bash
+install -d -m 700 ~/.config/systemd/user
+install -m 600 deploy/linux/aurapilot-ln-tunnel.service \
+  ~/.config/systemd/user/aurapilot-ln-tunnel.service
+systemctl --user daemon-reload
+systemctl --user enable --now aurapilot-ln-tunnel.service
+```
+
+The gateway should then use `http://127.0.0.1:8767` for `--ln-url`. Enable
+systemd user lingering for the deployment account if the tunnel must start at
+boot before that user logs in.
+
 A macOS `launchd` template is available at
 `deploy/macos/com.aurapilot.monitor-gateway.plist.example`. Replace its three
 placeholders with the Python executable, repository, and log-directory paths
