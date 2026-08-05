@@ -94,6 +94,13 @@ class GatewayTests(unittest.TestCase):
         self.assertIn('"apiBase": "/collector/ln"', source)
         self.assertIn('"apiBase": "/collector/huoshan"', source)
 
+    def test_project_status_filter_uses_complete_label(self) -> None:
+        with urlopen(f"{self.base_url}/", timeout=2) as response:
+            source = response.read().decode("utf-8")
+
+        self.assertIn('data-project-status="complete">Complete ', source)
+        self.assertNotIn('data-project-status="complete">Done ', source)
+
     def test_gateway_proxies_json_and_preserves_server_identity(self) -> None:
         with urlopen(f"{self.base_url}/collector/ln/api/projects", timeout=2) as response:
             payload = json.load(response)
